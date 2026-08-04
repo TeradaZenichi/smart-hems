@@ -1,0 +1,6 @@
+{
+  "gru": {
+    "hidden": 128,
+    "mlp_hidden": 256
+  }
+}

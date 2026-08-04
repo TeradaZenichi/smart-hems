@@ -1,0 +1,6 @@
+{
+  "hist_days": 7,
+  "horizon_hours": 24,
+  "n_series": 2,
+  "weather_d1_cols": ["drybulb_C", "Global Horizontal Radiation"]
+}
