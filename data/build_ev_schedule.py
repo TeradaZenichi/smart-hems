@@ -3,8 +3,8 @@
 Source: Dataset 1 (Norwegian residential charging sessions, Dec 2018 - Jan 2020).
 Two profiles, each from one private user with ~1 year of overnight home charging:
 
-  current -> AsO2-1  (used by scenarios REF, TDYC, CC, WC)
-  future  -> AdO1-3  (used by scenarios TDYF, CF, WF)
+  current     -> AsO2-1  (default profile in every simulation CSV)
+  high_demand -> AdO1-3  (generalization test with heavier mobility demand)
 
 Column semantics (matching the reference Simulation_*.csv files):
   ev_conn      0 away, 1 connected, 2 last step before departure
@@ -20,7 +20,7 @@ the Monday of the user's first week, so weekdays line up with the TOU tariff
 calendar (day 0 = Monday). Days outside the user's observation window are filled
 by copying the nearest observed day with the same weekday (multiples of 7 days).
 
-Outputs: data/EV/ev_schedule_{current,future}_{5min,15min}.csv
+Outputs: data/EV/ev_schedule_{current,high_demand}_{5min,15min}.csv
 """
 
 import os
@@ -32,7 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SESSIONS_CSV = os.path.join(HERE, "EV", "Dataset 1_EV charging reports.csv")
 OUT_DIR = os.path.join(HERE, "EV")
 
-PROFILES = {"current": "AsO2-1", "future": "AdO1-3"}
+PROFILES = {"current": "AsO2-1", "high_demand": "AdO1-3"}
 RESOLUTIONS = {"5min": 288, "15min": 96}
 
 EMAX_KWH = 40.0

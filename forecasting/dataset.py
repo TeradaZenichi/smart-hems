@@ -2,9 +2,13 @@
 """Supervised windows for the forecaster, honoring the project's data split.
 
 A sample is a forecast ORIGIN t in one series (case x scenario):
-    hist:    [t-672, t)  demand & pv, normalized            (672, 2)
-    static:  calendar at t (6) + next-24h weather (48)      (54,)
+    hist:    [t-672, t)  demand, pv, temperature, radiation (672, 4)
+    static:  calendar + family + house/PV configuration     (18,)
     target:  [t, t+96)   demand & pv, normalized            (96, 2)
+
+Weather channels are observations from the historical window. Future weather
+from the CSV is not exposed because it is realized weather, not an archived
+forecast available at origin t.
 
 Split rules (already agreed, implemented here so they cannot drift):
   - train origins: hourly stride; the TARGET may not touch a validation
@@ -22,7 +26,15 @@ import torch
 from torch.utils.data import Dataset
 
 from environment.dataset import CSV_DIR, SPLITS, list_cases, validation_weeks
-from model.spec import HIST_STEPS, HORIZON, WEATHER_D1_COLS, WEATHER_STRIDE
+from model.spec import (
+    FAMILIES,
+    HIST_STEPS,
+    HIST_WEATHER,
+    HORIZON,
+    HOUSE_ORIENTATIONS,
+    PV_ORIENTATIONS,
+    TARGETS,
+)
 
 PARAMS_PATH = os.path.join(CSV_DIR, "parameters.json")
 VAL_HOURS = (0, 6, 12, 18)
@@ -73,6 +85,42 @@ def calendar_features(ts: pd.Timestamp) -> torch.Tensor:
     ], dtype=torch.float32)
 
 
+def _one_hot(value: str, choices: list[str]) -> torch.Tensor:
+    """One-hot with a fixed order defined in model/spec.json."""
+    if value not in choices:
+        raise ValueError(f"unknown category {value!r}; expected one of {choices}")
+    out = torch.zeros(len(choices), dtype=torch.float32)
+    out[choices.index(value)] = 1.0
+    return out
+
+
+def case_features(case: str) -> torch.Tensor:
+    """Family and house/PV configuration encoded as 12 model features.
+
+    Case format:
+        family_house_envelope_pv-tilt(angle)_capacity
+
+    The envelope and PV capacity are omitted because the balanced dataset has
+    only poor and PV1000. Hyphens in filenames become underscores in model
+    categories. Tilt is divided by 90 to keep it in [0, 1].
+    """
+    try:
+        family_text, house, _, pv_tilt, _ = case.split("_")
+        pv_text, tilt_text = pv_tilt.split("-tilt(")
+        tilt = float(tilt_text.removesuffix(")"))
+        family = family_text.replace("-", "_")
+        pv = pv_text.replace("-", "_")
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(f"invalid case id: {case!r}") from exc
+
+    return torch.cat([
+        _one_hot(family, FAMILIES),
+        _one_hot(house, HOUSE_ORIENTATIONS),
+        _one_hot(pv, PV_ORIENTATIONS),
+        torch.tensor([tilt / 90.0], dtype=torch.float32),
+    ])
+
+
 class ForecastWindows(Dataset):
     """All windows of a split ('train' | 'val') over a list of scenarios
     (default: forecast_train).
@@ -95,11 +143,10 @@ class ForecastWindows(Dataset):
                 df = pd.read_csv(paths[scenario], sep=";")
                 index = pd.to_datetime(df["timestamp"], format="%d/%m/%Y %H:%M")
                 power = torch.stack([
-                    self.norm.transform_power(_col(df, "electricity_demand_rate_W")),
-                    self.norm.transform_power(_col(df, "produced_electricity_rate_W")),
+                    self.norm.transform_power(_col(df, c)) for c in TARGETS
                 ], dim=1)                                        # (35040, 2)
                 weather = torch.stack([
-                    self.norm.transform_weather(_col(df, c), c) for c in WEATHER_D1_COLS
+                    self.norm.transform_weather(_col(df, c), c) for c in HIST_WEATHER
                 ], dim=1)                                        # (35040, 2)
                 s = len(self.series)
                 self.series.append({"power": power, "weather": weather,
@@ -137,9 +184,12 @@ class ForecastWindows(Dataset):
     def __getitem__(self, k: int):
         s, i = self.origins[k]
         serie = self.series[s]
-        hist = serie["power"][i - HIST_STEPS:i]
+        power_hist = serie["power"][i - HIST_STEPS:i]
+        weather_hist = serie["weather"][i - HIST_STEPS:i]
+        hist = torch.cat([power_hist, weather_hist], dim=1)
         target = serie["power"][i:i + HORIZON]
-        cal = calendar_features(serie["index"][i])
-        weather_d1 = serie["weather"][i:i + HORIZON:WEATHER_STRIDE].reshape(-1)
-        static = torch.cat([cal, weather_d1], dim=0)
+        static = torch.cat([
+            calendar_features(serie["index"][i]),
+            case_features(serie["case"]),
+        ])
         return hist, static, target

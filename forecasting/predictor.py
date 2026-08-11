@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """Feature caches: transformam previsões em observações para o SAC.
 
-A interface é a mesma para M3 e M4 — essa igualdade É o experimento:
-    GroundTruthFeatureCache  -> blocos do futuro real       (M3, oracle)
-    ForecastFeatureCache     -> blocos da saída do modelo   (M4)
+A interface é a mesma nos dois testes:
+    GroundTruthFeatureCache  -> blocos do futuro real
+    ForecastFeatureCache     -> blocos da saída do modelo
 
 Ambas produzem, por série-ano, um array (35040, 24): para cada passo t,
 as próximas 24 h de [demanda, pv] comprimidas em 12 blocos de 2 h.
@@ -16,12 +16,13 @@ import os
 import numpy as np
 import torch
 
-from model.spec import HIST_STEPS, HORIZON
+from forecasting.dataset import calendar_features, case_features
+from model.spec import HIST_STEPS, HORIZON, N_TARGETS
 
 N_BLOCKS = 12                      # 24 h em blocos de 2 h
 BLOCK = HORIZON // N_BLOCKS        # 8 passos de 15 min por bloco
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                         "data", "forecast_cache")
+                         "results", "forecast_cache")
 
 
 class BlockCompressor:
@@ -30,7 +31,8 @@ class BlockCompressor:
 
     def __call__(self, horizon: torch.Tensor) -> torch.Tensor:
         # TODO(lição 4): sem loops! Só reshape + redução + concat.
-        #   1. horizon.reshape(-1, N_BLOCKS, BLOCK, 2)   (N, 12, 8, 2)
+        #   1. horizon.reshape(-1, N_BLOCKS, BLOCK, N_TARGETS)
+        #                                                   (N, 12, 8, 2)
         #        agrupa os 96 passos em 12 blocos de 8 (= 2 h)
         #   2. .mean(dim=2)                              (N, 12, 2)
         #        média DENTRO de cada bloco (dim=2 é o eixo dos 8 passos)
@@ -42,7 +44,7 @@ class BlockCompressor:
 
 
 class GroundTruthFeatureCache:
-    """Blocos calculados do futuro REAL da série — o teto de informação (M3).
+    """Blocos do futuro real — teste com informação futura perfeita.
 
     power: tensor (35040, 2) normalizado (mesma Normalizer do dataset).
     """
@@ -72,9 +74,10 @@ class GroundTruthFeatureCache:
 
 
 class ForecastFeatureCache:
-    """Blocos calculados da PREVISÃO do modelo para cada origem do ano (M4).
+    """Blocos da previsão do modelo para cada origem do ano.
 
     series: dict como os de ForecastWindows.series (power, weather, index).
+    Weather is observed history; realized future weather is not a model input.
     O modelo roda em batches — 35 mil forwards um a um desperdiçariam a GPU.
     """
 
@@ -93,9 +96,14 @@ class ForecastFeatureCache:
         # TODO(lição 5): rode o modelo em batches (nunca 1 origem por vez).
         #   Origens válidas: range(HIST_STEPS, n - HORIZON + 1).
         #   Para cada batch dessas origens t:
-        #     1. monte hist e static (mesma receita do __getitem__) e EMPILHE:
-        #          torch.stack([...], dim=0)  transforma lista de (672,2) em
-        #          um tensor (B, 672, 2); idem static -> (B, 54)
+        #     1. monte hist e static (mesma receita do __getitem__) e EMPILHE.
+        #        Para cada origem, concatene em dim=1:
+        #          series["power"][t-HIST_STEPS:t]    (672, 2)
+        #          series["weather"][t-HIST_STEPS:t]  (672, 2)
+        #        O resultado e hist (672, 4). Para static, concatene as seis
+        #        calendar_features do timestamp t com case_features da serie.
+        #        Com torch.stack(..., dim=0):
+        #          hist (B, 672, 4), static (B, 18)
         #     2. self.model.eval(); with torch.no_grad():
         #          pred = self.model(hist.to(self.device), static.to(self.device))
         #     3. self.compress(pred).cpu()  -> guarde numa lista
@@ -107,7 +115,7 @@ class ForecastFeatureCache:
 
 
 def cache_path(case: str, scenario: str, kind: str) -> str:
-    """kind: 'truth' (M3) ou 'forecast' (M4)."""
+    """kind: 'truth' para futuro perfeito ou 'forecast' para o modelo."""
     return os.path.join(CACHE_DIR, f"{kind}_{scenario}_{case}.npy")
 
 

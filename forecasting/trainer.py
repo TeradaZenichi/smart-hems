@@ -18,7 +18,7 @@ class Trainer:
     Uso:
         t = Trainer(model)
         historia = t.fit(train_ds, val_ds)
-        t.save("data/checkpoints/forecaster.pt")
+        t.save("results/forecaster_gru.pt")
     """
 
     def __init__(self, model, lr: float = 3e-4, batch_size: int = 256,

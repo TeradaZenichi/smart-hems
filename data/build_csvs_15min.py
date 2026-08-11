@@ -13,9 +13,10 @@ and with the tariff columns replaced:
 Demand/PV are taken as-is (EnergyPlus end-of-interval labels realigned to
 interval start). Weather is the scenario EPW stretched onto the 15-min grid
 with the same np.interp scheme validated against the 5-min reference files.
-EV columns come from data/EV/ev_schedule_*_15min.csv (build_ev_schedule.py):
-one profile shared by all current-climate scenarios (REF, TDYC, CC, WC) and a
-different one shared by all future-climate scenarios (TDYF, CF, WF).
+EV columns use data/EV/ev_schedule_current_15min.csv in every scenario, so
+climate is the only distribution shift in the main test. The high-demand EV
+profile remains separate and is applied by environment.dataset only in the
+mobility-generalization test.
 """
 
 import glob
@@ -28,6 +29,16 @@ import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 NEW = os.path.join(HERE, "new")
 OUT = os.path.join(HERE, "csvs")
+
+SCENARIO_DIR = {
+    "REF": "reference",
+    "CC": os.path.join("current", "cold"),
+    "WC": os.path.join("current", "warm"),
+    "CF": os.path.join("future", "cold"),
+    "WF": os.path.join("future", "warm"),
+    "TDYC": os.path.join("typical", "current"),
+    "TDYF": os.path.join("typical", "future"),
+}
 
 N_15MIN = 365 * 24 * 4          # 35040
 N_HOUR = 365 * 24               # 8760
@@ -59,17 +70,30 @@ WD_DIR = os.path.join(
 )
 TOU_PATH = os.path.join(NEW, "BEL_REF_Brussels.064510_IWEC 1(1)_tou.csv")
 
-SCENARIO_EV_PROFILE = {
-    "REF": "current", "TDYC": "current", "CC": "current", "WC": "current",
-    "TDYF": "future", "CF": "future", "WF": "future",
-}
-
 COLUMNS = [
     "timestamp", "electricity_demand_rate_W", "produced_electricity_rate_W",
     "drybulb_C", "relhum_percent", "Global Horizontal Radiation", "dni_Wm2",
     "dhi_Wm2", "Wind Speed (m/s)", "wdir_deg", "ev_status", "tar_flat",
     "tar_tou", "tar_rtp", "ev_conn", "ev_arrival", "ev_departure",
 ]
+
+FAMILY_NAMES = {
+    "2jong": "young-couple",
+    "2oud": "older-couple",
+    "2vol2kids": "family-with-children",
+}
+HOUSE_NAMES = {
+    "noord": "north",
+    "oost": "east",
+    "west": "west",
+    "zuid": "south",
+}
+PV_NAMES = {
+    "O": "east",
+    "OW": "east-west",
+    "W": "west",
+    "Z": "south",
+}
 
 
 def hourly_price_15min(path):
@@ -111,15 +135,19 @@ def parse_rad_name(name):
     if not m:
         raise ValueError(f"unexpected RAD file name: {name}")
     building, scenario, layout = m.groups()
-    return scenario, f"Simulation_{scenario}_RAD_{building}_{layout}.csv"
+    family_raw, house_raw, envelope_raw = building.split("_", maxsplit=2)
+    pv_raw, tilt = layout.split("-tilt(", maxsplit=1)
+    family = FAMILY_NAMES[family_raw]
+    house = HOUSE_NAMES[house_raw]
+    envelope = "poor" if envelope_raw == "SLECHT" else envelope_raw.lower()
+    pv = PV_NAMES[pv_raw]
+    case = f"{family}_{house}_{envelope}_{pv}-tilt({tilt}"
+    return scenario, f"Simulation_{scenario}_RAD_{case}.csv"
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    ev_profiles = {
-        p: pd.read_csv(os.path.join(HERE, "EV", f"ev_schedule_{p}_15min.csv"))
-        for p in ("current", "future")
-    }
+    ev = pd.read_csv(os.path.join(HERE, "EV", "ev_schedule_current_15min.csv"))
     # 2001 starts on a Monday and is not a leap year, so the timestamps' weekday
     # matches the TOU/EV calendar (day 0 = Monday) and the year ends on 31/12
     timestamps = pd.date_range("2001-01-01", periods=N_15MIN, freq="15min").strftime(
@@ -142,8 +170,6 @@ def main():
 
         rad = pd.read_csv(path)
         assert len(rad) == N_15MIN, f"{path}: {len(rad)} rows"
-        ev = ev_profiles[SCENARIO_EV_PROFILE[scenario]]
-
         df = pd.DataFrame({
             "timestamp": timestamps,
             "electricity_demand_rate_W": rad.iloc[:, 1].to_numpy(dtype=float),
@@ -157,7 +183,9 @@ def main():
             "ev_arrival": ev["ev_arrival"].to_numpy(),
             "ev_departure": ev["ev_departure"].to_numpy(),
         })[COLUMNS]
-        df.to_csv(os.path.join(OUT, out_name), sep=";", index=False)
+        out_dir = os.path.join(OUT, SCENARIO_DIR[scenario])
+        os.makedirs(out_dir, exist_ok=True)
+        df.to_csv(os.path.join(out_dir, out_name), sep=";", index=False)
         print(f"[{i}/{len(rad_files)}] {out_name}")
 
 

@@ -18,9 +18,9 @@ lição.
 | 1 | Tensores | criação, dtype, shape, indexação, broadcasting, reduções, GPU | custo anual do baseline **M0** (sem bateria) |
 | 2 | Autograd | `requires_grad`, `backward()`, grafo computacional, `no_grad` | gradiente do custo em relação ao dimensionamento do PV |
 | 3 | `nn.Module` + Dataset | `Linear`, `Dataset`/`DataLoader`, loop de treino, loss, otimizador | baseline de previsão por regressão linear |
-| 4 | Redes recorrentes | `nn.GRU`, sequências, empacotamento, early stopping, checkpoint | o **forecaster** de demanda/PV (M4) |
+| 4 | Redes recorrentes | `nn.GRU`, sequências, empacotamento, early stopping, checkpoint | o **forecaster** de demanda/PV |
 | 5 | GPU e performance | `.to('cuda')`, batching, mixed precision, profiling | treino do forecaster na RTX 3060 |
-| 6 | RL: as sutilezas | `detach`, target networks, dois otimizadores, log-prob com tanh | o harness **SAC** (M2/M3) |
+| 6 | RL: as sutilezas | `detach`, target networks, dois otimizadores, log-prob com tanh | os testes de controle sem previsão e com futuro perfeito |
 
 Regras do formato combinado:
 - Eu escrevo a estrutura e as explicações; **você preenche os `TODO`**.

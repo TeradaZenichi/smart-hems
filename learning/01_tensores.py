@@ -23,7 +23,8 @@ import pandas as pd
 import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CSV = PROJECT_ROOT / "data" / "csvs" / "Simulation_REF_RAD_2jong_zuid_SLECHT_Z-tilt(45)_PV1000.csv"
+CSV = (PROJECT_ROOT / "data" / "csvs" / "reference"
+       / "Simulation_REF_RAD_young-couple_south_poor_south-tilt(45)_PV1000.csv")
 df = pd.read_csv(CSV, sep=";")
 
 

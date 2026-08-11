@@ -300,7 +300,8 @@ class SmartHomeEnv(gym.Env):
         # at the end of every observation; empty tuple keeps the space unchanged
         self.context = tuple(float(c) for c in (context or ()))
         # per-step exogenous features, one row per timestep (e.g. the forecast
-        # feature cache for M3/M4); row t_idx is appended to the observation
+        # feature cache with perfect future or model forecast); row t_idx is
+        # appended to the observation
         if extra_obs is not None:
             extra_obs = np.asarray(extra_obs, dtype=np.float32)
             assert len(extra_obs) == len(df), \

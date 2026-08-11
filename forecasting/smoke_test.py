@@ -33,50 +33,73 @@ def etapa_1_normalizer():
 
 def etapa_2_calendario():
     import pandas as pd
-    from forecasting.dataset import calendar_features
+    from forecasting.dataset import calendar_features, case_features
+    from model.spec import META_DIM
     c = calendar_features(pd.Timestamp("2001-01-01 00:00"))
     assert c.shape == (6,), f"esperava (6,), veio {tuple(c.shape)}"
     assert abs(c[0]) < 1e-6 and abs(c[1] - 1.0) < 1e-6, "meia-noite: sin=0, cos=1"
+    meta = case_features("young-couple_east_poor_east-west-tilt(30)_PV1000")
+    assert meta.shape == (META_DIM,), f"esperava metadata ({META_DIM},), veio {tuple(meta.shape)}"
+    assert meta[:-1].sum().item() == 3.0, "familia, casa e PV devem ter um one-hot cada"
+    assert abs(meta[-1].item() - 30.0 / 90.0) < 1e-6, "tilt deve ser normalizado por 90"
     print("ok")
 
 
 def etapa_3_dataset():
     from forecasting.dataset import ForecastWindows
+    from model.spec import HIST_DIM, HIST_STEPS, HORIZON, N_TARGETS, STATIC_DIM
     print("  (carregando 18 CSVs do cenario REF...)")
     ds = ForecastWindows("val", scenarios=["REF"])
     hist, static, target = ds[0]
-    assert hist.shape == (672, 2) and static.shape == (54,) and target.shape == (96, 2), \
+    assert hist.shape == (HIST_STEPS, HIST_DIM) and static.shape == (STATIC_DIM,) \
+        and target.shape == (HORIZON, N_TARGETS), \
         f"shapes: hist {tuple(hist.shape)} static {tuple(static.shape)} target {tuple(target.shape)}"
     s, i = ds.origins[0]
-    assert torch.equal(hist[-1], ds.series[s]["power"][i - 1]), "hist deve terminar em i-1"
+    assert torch.equal(hist[-1, :N_TARGETS], ds.series[s]["power"][i - 1]), \
+        "historico de potencia deve terminar em i-1"
+    assert torch.equal(hist[-1, N_TARGETS:], ds.series[s]["weather"][i - 1]), \
+        "historico meteorologico deve terminar em i-1"
     assert torch.equal(target[0], ds.series[s]["power"][i]), "target deve comecar em i"
     print(f"ok ({len(ds)} janelas)")
 
 
 def etapa_4_baselines():
     from model.baselines import PersistenceForecaster, SeasonalPersistenceForecaster
-    fake = torch.arange(672 * 2, dtype=torch.float32).reshape(1, 672, 2)
-    assert torch.equal(PersistenceForecaster()(fake, None), fake[:, -96:, :]), "persistencia = ultimas 24h"
-    assert torch.equal(SeasonalPersistenceForecaster()(fake, None), fake[:, :96, :]), "sazonal = D-7"
+    from model.spec import HIST_DIM, HIST_STEPS, HORIZON, N_TARGETS
+    fake = torch.arange(HIST_STEPS * HIST_DIM, dtype=torch.float32).reshape(1, HIST_STEPS, HIST_DIM)
+    assert torch.equal(PersistenceForecaster()(fake, None), fake[:, -HORIZON:, :N_TARGETS]), \
+        "persistencia = alvos das ultimas 24h"
+    assert torch.equal(SeasonalPersistenceForecaster()(fake, None), fake[:, :HORIZON, :N_TARGETS]), \
+        "sazonal = alvos de D-7"
     print("ok")
 
 
 def etapa_5_gru():
     from model.gru import GRUForecaster
+    from model.spec import HIST_DIM, HIST_STEPS, HORIZON, N_TARGETS, STATIC_DIM
     model = GRUForecaster(hidden=32, mlp_hidden=64)
-    hist, static = torch.randn(4, 672, 2), torch.randn(4, 54)
+    assert model.load_head[-1].out_features == HORIZON, "cabeca de demanda deve prever 96 passos"
+    assert model.pv_head[-1].out_features == HORIZON, "cabeca de PV deve prever 96 passos"
+    hist = torch.randn(4, HIST_STEPS, HIST_DIM)
+    static = torch.randn(4, STATIC_DIM)
     out = model(hist, static)
-    assert out.shape == (4, 96, 2), f"forward deve sair (4, 96, 2), veio {tuple(out.shape)}"
+    assert out.shape == (4, HORIZON, N_TARGETS), \
+        f"forward deve sair (4, {HORIZON}, {N_TARGETS}), veio {tuple(out.shape)}"
     print("ok")
 
 
 def etapa_6_trainer():
     from torch.utils.data import DataLoader, TensorDataset
     from model.gru import GRUForecaster
+    from model.spec import HIST_DIM, HIST_STEPS, HORIZON, N_TARGETS, STATIC_DIM
     from forecasting.trainer import Trainer
 
     torch.manual_seed(0)
-    ds = TensorDataset(torch.randn(32, 672, 2), torch.randn(32, 54), torch.randn(32, 96, 2))
+    ds = TensorDataset(
+        torch.randn(32, HIST_STEPS, HIST_DIM),
+        torch.randn(32, STATIC_DIM),
+        torch.randn(32, HORIZON, N_TARGETS),
+    )
     model = GRUForecaster(hidden=16, mlp_hidden=32)
     trainer = Trainer(model, lr=1e-2, batch_size=8, patience=5, device="cpu")
 

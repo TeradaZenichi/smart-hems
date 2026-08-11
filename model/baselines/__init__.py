@@ -10,7 +10,7 @@ from typing import Optional
 
 import torch
 
-from model.spec import HORIZON
+from model.spec import HORIZON, N_TARGETS
 
 
 class PersistenceForecaster:
@@ -19,7 +19,7 @@ class PersistenceForecaster:
     def forward(self, hist: torch.Tensor,
                 static: Optional[torch.Tensor] = None) -> torch.Tensor:
         # `static` is ignored; kept in the signature to match GRUForecaster.
-        return hist[:, -HORIZON:, :]
+        return hist[:, -HORIZON:, :N_TARGETS]
 
     __call__ = forward  # allow baseline(hist, static) like a Module
 
@@ -30,6 +30,6 @@ class SeasonalPersistenceForecaster:
 
     def forward(self, hist: torch.Tensor,
                 static: Optional[torch.Tensor] = None) -> torch.Tensor:
-        return hist[:, :HORIZON, :]
+        return hist[:, :HORIZON, :N_TARGETS]
 
     __call__ = forward

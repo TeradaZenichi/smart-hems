@@ -20,6 +20,7 @@ __main__ block below for a runnable example.
 import json
 import os
 import sys
+import tempfile
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
@@ -109,7 +110,7 @@ if __name__ == "__main__":
     # class smoke test: defaults, disk round-trip, old-JSON tolerance, and
     # Optuna sampling (skipped if optuna is not installed).
     hp = ForecasterHP()
-    tmp = str(PROJECT_ROOT / "data" / "checkpoints" / "_demo_hp.json")
+    tmp = os.path.join(tempfile.gettempdir(), "smart_hems_demo_hp.json")
     hp.save(tmp)
     assert ForecasterHP.load(tmp) == hp                # round-trip (compares by value)
     os.remove(tmp)

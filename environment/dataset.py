@@ -5,14 +5,15 @@ scaling, battery-only masking, normalization bounds) out of the simulator:
 SmartHomeEnv consumes the DataFrame returned by ``load_simulation_csv``
 unchanged.
 
-Climate-transfer split (all tariffs present in every subset). The forecaster
-and the SAC train on disjoint scenario-years, so the forecast errors the SAC
-sees are always out-of-sample for the forecaster:
+Climate-transfer split (all tariffs present in every subset). Forecasting is
+trained with the reference and both typical design years. The controller is
+trained and validated on current extremes, then tested only on future
+extremes:
 
-    forecast_train  REF, TDYC       (typical current years)
-    sac_train       CC, WC          (extreme current years, minus val weeks)
-    validation      12 held-out weeks per sac_train scenario (1 per month)
-    test            CF, TDYF, WF    (future climate, untouched by both)
+    forecast_train  REF, TDYC, TDYF  (reference + typical design years)
+    sac_train       CC, WC           (current extremes, minus val weeks)
+    validation      12 held-out weeks per current scenario (1 per month)
+    test            CF, WF           (future extremes, controller test only)
 """
 
 import glob
@@ -25,11 +26,18 @@ import pandas as pd
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CSV_DIR = os.path.join(HERE, "data", "csvs")
+EV_DIR = os.path.join(HERE, "data", "EV")
+
+EV_COLUMNS = ["ev_status", "ev_conn", "ev_arrival", "ev_departure"]
+EV_SCHEDULES = {
+    "current": os.path.join(EV_DIR, "ev_schedule_current_15min.csv"),
+    "high_demand": os.path.join(EV_DIR, "ev_schedule_high_demand_15min.csv"),
+}
 
 SPLITS = {
-    "forecast_train": ["REF", "TDYC"],
+    "forecast_train": ["REF", "TDYC", "TDYF"],
     "sac_train": ["CC", "WC"],
-    "test": ["CF", "TDYF", "WF"],
+    "test": ["CF", "WF"],
 }
 SCENARIOS = [s for split in SPLITS.values() for s in split]
 
@@ -51,7 +59,8 @@ def list_cases(csv_dir=CSV_DIR, balanced_only=True):
     returned, dropping the six REF-only extras so the design stays balanced.
     """
     cases = {}
-    for path in glob.glob(os.path.join(csv_dir, "Simulation_*.csv")):
+    pattern = os.path.join(csv_dir, "**", "Simulation_*.csv")
+    for path in glob.glob(pattern, recursive=True):
         m = _NAME_RE.match(os.path.basename(path))
         if not m:
             continue
@@ -71,20 +80,31 @@ def split_files(split, csv_dir=CSV_DIR, balanced_only=True):
     ]
 
 
-def load_simulation_csv(path, pv_scale=1.0, battery_only=False):
+def load_simulation_csv(path, pv_scale=1.0, battery_only=False,
+                        ev_profile="current"):
     """Load one scenario CSV ready for SmartHomeEnv.
 
-    pv_scale multiplies the PV1000 (1 kW reference) generation column, e.g.
-    2.5 / 5.0 / 7.5 for the system sizes considered. battery_only zeroes the
-    EV schedule, which makes EVEnv inert (P = 0, no costs) without any
-    environment change.
+    pv_scale multiplies the PV1000 (1 kW reference) generation column.
+    Every simulation CSV embeds the current EV profile. Passing
+    ``ev_profile="high_demand"`` replaces only its EV columns, keeping climate,
+    demand, PV and tariffs identical for the mobility-generalization test.
+    battery_only zeroes the selected EV schedule and makes EVEnv inert.
     """
     df = pd.read_csv(path, sep=";")
     df["timestamp"] = pd.to_datetime(df["timestamp"], format="%d/%m/%Y %H:%M")
     df = df.set_index("timestamp")
     df["produced_electricity_rate_W"] = df["produced_electricity_rate_W"] * pv_scale
+    if ev_profile not in EV_SCHEDULES:
+        raise ValueError(f"unknown EV profile: {ev_profile}")
+    if ev_profile != "current":
+        schedule = pd.read_csv(EV_SCHEDULES[ev_profile])
+        if len(schedule) != len(df):
+            raise ValueError(
+                f"EV profile has {len(schedule)} rows for {len(df)} timesteps"
+            )
+        df[EV_COLUMNS] = schedule[EV_COLUMNS].to_numpy()
     if battery_only:
-        df[["ev_status", "ev_conn", "ev_arrival", "ev_departure"]] = 0
+        df[EV_COLUMNS] = 0
     return df
 
 

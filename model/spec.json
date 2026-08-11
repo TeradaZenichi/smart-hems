@@ -1,6 +1,29 @@
 {
   "hist_days": 7,
   "horizon_hours": 24,
-  "n_series": 2,
-  "weather_d1_cols": ["drybulb_C", "Global Horizontal Radiation"]
+  "targets": [
+    "electricity_demand_rate_W",
+    "produced_electricity_rate_W"
+  ],
+  "hist_weather": [
+    "drybulb_C",
+    "Global Horizontal Radiation"
+  ],
+  "families": [
+    "young_couple",
+    "older_couple",
+    "family_with_children"
+  ],
+  "house_orientations": [
+    "north",
+    "east",
+    "west",
+    "south"
+  ],
+  "pv_orientations": [
+    "east",
+    "east_west",
+    "west",
+    "south"
+  ]
 }
